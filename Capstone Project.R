@@ -93,7 +93,7 @@ head(termfreq,10)
 # Word Frequency Bar Graph
 wf <- data.frame(word=names(termfreq), freq=termfreq)   
    
-p <- ggplot(subset(wf, freq>400), aes(word, freq))    
+p <- ggplot(subset(wf, freq>2000), aes(word, freq))    
 p <- p + geom_bar(stat="identity")   
 p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
 p   
@@ -120,23 +120,14 @@ for (row in all_complaints_small) {
   sentimentdf<-0
   for (i in splitrow){
     sent = get_sentiment(i)
-    sum(sent)
   }
-  newdf<-data.frame(row,SUM(sentimentdf))
-  #newdf["complaint"]<-row
-  #newdf["sentiment"]<-sentimentdf
+  newdf<-data.frame(row,sum(sent))
 }
 
-
-
-row[2]
-sent = 0
-is.vector(sentimentdf)
-
-c0<-sentimentdf[sentimentdf$polarity=='negative',]
+c0<-sentimentdf[sentimentdf$sent < 0,]
 c0["sentiment"]<- 0
 
-c1<-sentimentdf[sentimentdf$polarity=='positive',]
+c1<-sentimentdf[sentimentdf$polarity > 0,]
 c1["sentiment"]<- 1
 
 
