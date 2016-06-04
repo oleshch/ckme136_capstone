@@ -20,3 +20,4 @@ vignettes/*.pdf
 #Database
 database.sqlite
 
+.Rproj.user

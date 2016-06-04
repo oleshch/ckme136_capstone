@@ -1,7 +1,7 @@
 # Capstone Project 
 # Orest Leshchyshen
 
-#Set Environmental variables to work with MAC
+# Set Environmental variables to work with MAC
 # Java 1.6 will set up the 'Home' link under /Library/Java
 Sys.setenv(JAVA_HOME = '/Library/Java//Home') 
 Sys.setenv(LD_LIBRARY_PATH = '$LD_LIBRARY_PATH:$JAVA_HOME/lib')
@@ -13,6 +13,12 @@ Sys.setenv(LD_LIBRARY_PATH = '$LD_LIBRARY_PATH:$JAVA_HOME/lib')
 #install.packages("fpc")
 install.packages("rJava", type='source')
 install.packages("RWeka")
+require(devtools)
+install_github('okugami79/sentiment140')
+install.packages("qdapRegex")
+install.packages("syuzhet")
+
+
 
 # Load Packages
 library(RSQLite)
@@ -23,7 +29,9 @@ library(ggplot2)
 library(wordcloud)   
 library(fpc)
 library(RWeka)
-
+library(sentiment)
+library(qdapRegex)
+library(syuzhet)
 
 # ------------------
 # Loading the Data
@@ -36,7 +44,8 @@ dbconn <- dbConnect(SQLite(), "database.sqlite")
 all_complaints <- dbGetQuery(dbconn, "SELECT consumer_complaint_narrative 
                              FROM consumer_complaints 
                              WHERE consumer_complaint_narrative IS NOT NULL
-                             LIMIT 10000")
+                             ORDER BY RANDOM()
+                             LIMIT 5000")
 
 # ------------------
 # Preprocessing
@@ -54,7 +63,7 @@ myCorpus <- tm_map(myCorpus, tolower)
 # remove stop words
 myCorpus <- tm_map(myCorpus, removeWords, stopwords("english"))
 # Remove common word endings
-myCorpus <- tm_map(myCorpus, stemDocument) 
+myCorpus <- tm_map(myCorpus, stemDocument, language="english") 
 # Remove masked characters
 myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx", "xxxxxxxx","xxxxxxxxxxxx","xxxxxxxxxxxxxxxx"))   
 # Create plain text documents
@@ -66,6 +75,7 @@ myCorpus <- tm_map(myCorpus, PlainTextDocument)
 
 #Create Document Term Matrix
 dtm <- DocumentTermMatrix(myCorpus)
+dtm <- removeSparseTerms(dtm, 0.4)
 
 #Create Term Document Matrix
 tdm <- TermDocumentMatrix(myCorpus) 
@@ -83,7 +93,7 @@ head(termfreq,10)
 # Word Frequency Bar Graph
 wf <- data.frame(word=names(termfreq), freq=termfreq)   
    
-p <- ggplot(subset(wf, freq>4000), aes(word, freq))    
+p <- ggplot(subset(wf, freq>400), aes(word, freq))    
 p <- p + geom_bar(stat="identity")   
 p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
 p   
@@ -91,29 +101,44 @@ p
 # Word Cloud of Terms
 set.seed(142)   
 # Min frequesncy of 3000 occurences
-wordcloud(names(termfreq), termfreq, min.freq=3000, scale=c(5, .1), colors=brewer.pal(6, "Dark2"))   
+wordcloud(names(termfreq), termfreq, min.freq=300, scale=c(5, .1), colors=brewer.pal(6, "Dark2"))   
 
 # Top 100 words
 wordcloud(names(termfreq), termfreq, max.words=100, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
 
 
 
-findFreqTerms(dtm,30)
-
-dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=2, minDocFreq=5))
-
-sort(as.matrix(dtm_tfidf)[1,], decreasing=T)[1:3]
+#sort(as.matrix(dtm_tfidf)[1,], decreasing=F)[1:3]
 
 all_complaints_df<-data.frame(text=unlist(sapply(myCorpus, `[`)), stringsAsFactors=F)
 
-# Splitting Data in half randomly
-randomhalf <- sample(nrow(all_complaints_df), floor(nrow(all_complaints_df)*0.5))
-c0<-data.frame(all_complaints_df[randomhalf,])
-c1<-data.frame(all_complaints_df[-randomhalf,])
+all_complaints_small<-data.frame(all_complaints_df[1:10,]) 
 
-# Adding random sentiment
+# Split Complaint into words and run sentiment analysis on them
+for (row in all_complaints_small) {
+  splitrow<-strsplit(rm_white_multiple(row), " ")
+  sentimentdf<-0
+  for (i in splitrow){
+    sent = get_sentiment(i)
+    sum(sent)
+  }
+  newdf<-data.frame(row,SUM(sentimentdf))
+  #newdf["complaint"]<-row
+  #newdf["sentiment"]<-sentimentdf
+}
+
+
+
+row[2]
+sent = 0
+is.vector(sentimentdf)
+
+c0<-sentimentdf[sentimentdf$polarity=='negative',]
 c0["sentiment"]<- 0
+
+c1<-sentimentdf[sentimentdf$polarity=='positive',]
 c1["sentiment"]<- 1
+
 
 
 c0_50 <- c0[sample(nrow(c0), 50), ]
@@ -127,13 +152,20 @@ table(data_100$sentiment)
 df1 <- as.data.frame(as.matrix(dtm))
 df2 <- as.data.frame(as.matrix(dtm_tfidf))
 
+
+dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
+
+
 df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment))
 df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment))
 
-## using logistic regression 
+## Using logistic regression 
 formula = as.formula('out_put_class ~ .')
 weka_fit1 <- Logistic(formula, data = df1_c)
 evaluate_Weka_classifier(weka_fit1, numFolds = 10)
+
+#GLM package for logistic Regresion
+
 
 
 ## logistic regression with tf-idf
