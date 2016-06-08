@@ -77,6 +77,8 @@ myCorpus <- tm_map(myCorpus, PlainTextDocument)
 dtm <- DocumentTermMatrix(myCorpus)
 dtm <- removeSparseTerms(dtm, 0.4)
 
+dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
+
 #Create Term Document Matrix
 tdm <- TermDocumentMatrix(myCorpus) 
 
@@ -110,24 +112,27 @@ wordcloud(names(termfreq), termfreq, max.words=100, rot.per=0.2, colors=brewer.p
 
 #sort(as.matrix(dtm_tfidf)[1,], decreasing=F)[1:3]
 
-all_complaints_df<-data.frame(text=unlist(sapply(myCorpus, `[`)), stringsAsFactors=F)
+all_complaints_df<-data.frame(text=head(unlist(sapply(myCorpus, `[`)),-9), stringsAsFactors=F)
 
-all_complaints_small<-data.frame(all_complaints_df[1:10,]) 
+#all_complaints_small<-data.frame(all_complaints_df[1:10,]) 
 
-# Split Complaint into words and run sentiment analysis on them
-for (row in all_complaints_small) {
+# Split Complaint into words 
+for (row in all_complaints_df) {
   splitrow<-strsplit(rm_white_multiple(row), " ")
-  sentimentdf<-0
-  for (i in splitrow){
-    sent = get_sentiment(i)
-  }
-  newdf<-data.frame(row,sum(sent))
 }
 
-c0<-sentimentdf[sentimentdf$sent < 0,]
+# Run get_sentiment on each row
+score<-lapply(lapply(splitrow, function(x) get_sentiment(x) ), function(x) sum(x))
+
+# Create sentiment score
+sentimentdf<-data.frame(all_complaints_df,unlist(score))
+colnames(sentimentdf) <- c("complaints", "score")
+
+
+c0<-sentimentdf[sentimentdf$score < 0,]
 c0["sentiment"]<- 0
 
-c1<-sentimentdf[sentimentdf$polarity > 0,]
+c1<-sentimentdf[sentimentdf$score > 0,]
 c1["sentiment"]<- 1
 
 
@@ -144,11 +149,8 @@ df1 <- as.data.frame(as.matrix(dtm))
 df2 <- as.data.frame(as.matrix(dtm_tfidf))
 
 
-dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
-
-
-df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment))
-df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment))
+df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
+df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
 
 ## Using logistic regression 
 formula = as.formula('out_put_class ~ .')
