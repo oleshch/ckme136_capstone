@@ -1,8 +1,10 @@
+# ------------------
 # Capstone Project 
 # Orest Leshchyshen
+# ------------------
 
 # Install Packages
-list.of.packages <- c("RSQLite", "DBI","tm","SnowballC","wordcloud","qdapRegex","fpc", "rJava","RWeka","syuzhet" ,"ggmap", "zipcodes")
+list.of.packages <- c("RSQLite", "DBI","tm","SnowballC","wordcloud","qdapRegex","fpc", "rJava","RWeka","syuzhet" ,"ggmap", "zipcode","png")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)>0) {install.packages(new.packages)}
 
@@ -21,6 +23,7 @@ library(glm2)
 library(syuzhet)
 library(ggmap)
 library(zipcode)
+library(png)
 
 # ------------------
 # Loading the Data
@@ -102,10 +105,10 @@ ggplot(wordfreq, aes(x=reorder(word, freq), y=freq)) +
 set.seed(142)   
 
 # Min frequesncy of 3000 occurences
-wordcloud(names(termfreq), termfreq, min.freq=1000, scale=c(5, .1), colors=brewer.pal(6, "Dark2"))   
+wordcloud(names(termfreq), termfreq, min.freq=800, scale=c(5, .1), colors=brewer.pal(6, "Dark2"))   
 
 # Top 100 words
-wordcloud(names(termfreq), termfreq, max.words=800, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
+wordcloud(names(termfreq), termfreq, max.words=100, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
 
 # Number of Complaints by Product
 ggplot(data %>% group_by(product) %>% summarise(num_products=length(product)),
@@ -142,6 +145,8 @@ ggplot(company_response_to_consumer, aes(y = count, x = reorder(company_response
   ylab("Number of complaints by Company") +
   theme_light(base_size = 16) 
 
+
+# Location of complaints
 data("zipcode")
 mapzipcode<-data
 mapzipcode$zip<- gsub("X","0",data$zipcode)
@@ -153,13 +158,21 @@ maping <- mapzipcode %>%
   summarise(count = n()) %>%
   arrange(desc(count))
 
-map<-get_map(location='united states', zoom=4, maptype="roadmap")
+# Used to create map file
+wd<-getwd()
+filename<-paste0(wd,"/ggmapTemp")
+mapfile<-paste0(wd,"/map.rda")
+#map<-get_map(location='united states', zoom=4, source="osm", color="bw", filename=filename)
+#save(map, file=mapfile)
+
+load(mapfile)
+
 ggmap(map) +
-  geom_point(aes(x=longitude, y=latitude, size=count, colour=state.y), data=maping, alpha=.2) +
+  geom_point(aes(x=longitude, y=latitude, size=count, colour=state.y), data=maping, alpha=.7) +
   xlab("") + 
   ylab("") +
   theme_light(base_size = 16) +
-  geom_text(data = maping,aes(x=longitude, y=latitude, label = count, size =100),check_overlap = TRUE)
+  geom_text(data = maping,aes(x=longitude, y=latitude, label = count, size =400),check_overlap = TRUE,vjust=2)
 
 # ------------------
 # Structure the data for analysis
@@ -172,31 +185,50 @@ for (row in all_complaints_df) {
   splitrow<-strsplit(rm_white_multiple(row), " ")
 }
 
+length(splitrow)
+head(splitrow)
+
 # Run get_sentiment on each row
-score<-lapply(lapply(splitrow, function(x) get_sentiment(x) ), function(x) sum(x))
+syuzhet_score <- lapply(splitrow, function(x) get_sentiment(x, method="syuzhet") )
+bing_score<-lapply(splitrow, function(x) get_sentiment(x, method="bing") )
+afinn_score <- lapply(splitrow, function(x) get_sentiment(x, method="afinn") )
+nrc_score<-lapply(splitrow, function(x) get_sentiment(x, method="nrc") )
+
+syuzhet_score <- lapply(syuzhet_score, function(x) sum(sign(x)))
+bing_score <- lapply(bing_score, function(x) sum(sign(x)))
+afinn_score <- lapply(afinn_score, function(x) sum(sign(x)))
+nrc_score <- lapply(nrc_score, function(x) sum(sign(x)))
+
+all_scores<-cbind(
+  syuzhet_score,
+  bing_score,
+  afinn_score,
+  nrc_score
+)
+
 
 # Create sentiment score
-sentimentdf<-data.frame(all_complaints_df,unlist(score))
-colnames(sentimentdf) <- c("complaints", "score")
+sentimentdf<-data.frame(all_complaints_df,all_scores)
+colnames(sentimentdf) <- c("complaints", "syuzhet_score", "bing_score","afinn_score","nrc_score")
 
-c0<-sentimentdf[sentimentdf$score < 0,]
+c0<-sentimentdf[sentimentdf$syuzhet_score < 0,]
 c0["sentiment"]<- 0
 
-c1<-sentimentdf[sentimentdf$score > 0,]
+c1<-sentimentdf[sentimentdf$syuzhet_score > 0,]
 c1["sentiment"]<- 1
 
+# Take a random sampling of 50 rows
 
-c0_50 <- c0[sample(nrow(c0), 50), ]
-c1_50 <- c1[sample(nrow(c1), 50), ]
-names(c0_50)<- c("complaints","score","sentiment")
-names(c1_50)<- c("complaints","score","sentiment")
+c0_50 <- c0[sample(nrow(c0), 50),c(1,6)]
+c1_50 <- c1[sample(nrow(c1), 50),c(1,6)]
+names(c0_50)<- c("complaints","sentiment")
+names(c1_50)<- c("complaints","sentiment")
 
 data_100 <- rbind(c0_50, c1_50) 
 table(data_100$sentiment)
 
 df1 <- as.data.frame(as.matrix(dtm))
 df2 <- as.data.frame(as.matrix(dtm_tfidf))
-
 
 df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
 df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
