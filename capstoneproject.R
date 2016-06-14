@@ -4,7 +4,7 @@
 # ------------------
 
 # Install Packages
-list.of.packages <- c("RSQLite", "DBI","tm","SnowballC","wordcloud","qdapRegex","fpc", "rJava","RWeka","syuzhet" ,"ggmap", "zipcode","png")
+list.of.packages <- c("RSQLite", "DBI","tm","SnowballC","wordcloud","qdapRegex","fpc", "rJava","RWeka","syuzhet" ,"ggmap", "zipcode","png", "pROC")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)>0) {install.packages(new.packages)}
 
@@ -24,6 +24,7 @@ library(syuzhet)
 library(ggmap)
 library(zipcode)
 library(png)
+library(pROC)
 
 # ------------------
 # Loading the Data
@@ -41,12 +42,15 @@ all_complaints <- dbGetQuery(dbconn, "SELECT consumer_complaint_narrative
                              FROM consumer_complaints 
                              WHERE consumer_complaint_narrative IS NOT NULL
                              ORDER BY RANDOM()
-                             LIMIT 5000")
+                             LIMIT 1000")
 
 # ------------------
 # Preprocessing
 # ------------------
 
+#Remove four or more duplicate letters
+for (complaint in all_complaints) { all_complaints <- data.frame(gsub('([[:alpha:]])\\1{3,}', '\\1', complaint)) }
+#Make corpus
 myCorpus <- Corpus(VectorSource(all_complaints))
 # remove punctuation
 myCorpus <- tm_map(myCorpus, removePunctuation)
@@ -65,13 +69,14 @@ myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx", "xxxxxxxx","xxxxx
 # Create plain text documents
 myCorpus <- tm_map(myCorpus, PlainTextDocument) 
 
+
 # ------------------
 # Staging the data
 # ------------------
 
 #Create Document Term Matrix
 dtm <- DocumentTermMatrix(myCorpus)
-dtm <- removeSparseTerms(dtm, 0.4)
+#dtm <- removeSparseTerms(dtm, 0.4)
 
 # Create Term frequency - inverse document frequency Matrix
 dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
@@ -185,9 +190,6 @@ for (row in all_complaints_df) {
   splitrow<-strsplit(rm_white_multiple(row), " ")
 }
 
-length(splitrow)
-head(splitrow)
-
 # Run get_sentiment on each row
 syuzhet_score <- lapply(splitrow, function(x) get_sentiment(x, method="syuzhet") )
 bing_score<-lapply(splitrow, function(x) get_sentiment(x, method="bing") )
@@ -206,19 +208,17 @@ all_scores<-cbind(
   nrc_score
 )
 
-
 # Create sentiment score
 sentimentdf<-data.frame(all_complaints_df,all_scores)
 colnames(sentimentdf) <- c("complaints", "syuzhet_score", "bing_score","afinn_score","nrc_score")
 
-c0<-sentimentdf[sentimentdf$syuzhet_score < 0,]
+c0<-sentimentdf[sentimentdf$nrc_score > 0,]
 c0["sentiment"]<- 0
 
-c1<-sentimentdf[sentimentdf$syuzhet_score > 0,]
+c1<-sentimentdf[sentimentdf$nrc_score < 0,]
 c1["sentiment"]<- 1
 
 # Take a random sampling of 50 rows
-
 c0_50 <- c0[sample(nrow(c0), 50),c(1,6)]
 c1_50 <- c1[sample(nrow(c1), 50),c(1,6)]
 names(c0_50)<- c("complaints","sentiment")
@@ -230,8 +230,10 @@ table(data_100$sentiment)
 df1 <- as.data.frame(as.matrix(dtm))
 df2 <- as.data.frame(as.matrix(dtm_tfidf))
 
-df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
-df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment), row.names = NULL)
+df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment))
+df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment))
+
+#write.csv(df1_c, file="def1_c.csv")
 
 
 ## Using logistic regression 
