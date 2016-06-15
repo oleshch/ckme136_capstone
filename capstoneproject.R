@@ -42,7 +42,7 @@ all_complaints <- dbGetQuery(dbconn, "SELECT consumer_complaint_narrative
                              FROM consumer_complaints 
                              WHERE consumer_complaint_narrative IS NOT NULL
                              ORDER BY RANDOM()
-                             LIMIT 5000")
+                             LIMIT 10000")
 
 # ------------------
 # Preprocessing
@@ -51,7 +51,7 @@ all_complaints <- dbGetQuery(dbconn, "SELECT consumer_complaint_narrative
 #Remove four or more duplicate letters
 for (complaint in all_complaints) { all_complaints <- data.frame(gsub('([[:alpha:]])\\1{3,}', '\\1', complaint)) }
 #Make corpus
-myCorpus <- Corpus(VectorSource(all_complaints))
+myCorpus <- Corpus(DataframeSource(all_complaints))
 # remove punctuation
 myCorpus <- tm_map(myCorpus, removePunctuation)
 # remove numbers
@@ -65,7 +65,7 @@ myCorpus <- tm_map(myCorpus, removeWords, stopwords("english"))
 # Remove common word endings
 myCorpus <- tm_map(myCorpus, stemDocument, language="english") 
 # Remove masked characters
-myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx","xxxxx", "xxxxxxxx","xxxxxxxxxxxx","xxxxxxxxxxxxxxxx"))   
+myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx","xxxxx", "xxxxxxxx","xxxxxxxxxx","xxxxxxxxxxxx","xxxxxxxxxxxxxxxx"))   
 # Create plain text documents
 myCorpus <- tm_map(myCorpus, PlainTextDocument) 
 
@@ -75,8 +75,8 @@ myCorpus <- tm_map(myCorpus, PlainTextDocument)
 # ------------------
 
 #Create Document Term Matrix
-dtm <- DocumentTermMatrix(myCorpus, minWordLength=3)
-dtm <- removeSparseTerms(dtm, 0.2)
+dtm <- DocumentTermMatrix(myCorpus, control = list(minWordLength=3))
+dtm <- removeSparseTerms(dtm, 0.8)
 
 # Create Term frequency - inverse document frequency Matrix
 dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
@@ -183,23 +183,25 @@ ggmap(map) +
 # Structure the data for analysis
 # ------------------
 
-all_complaints_df<-data.frame(text=head(unlist(sapply(myCorpus, `[`)),-9), stringsAsFactors=F)
+all_complaints_df<-data.frame(complaints=unlist(lapply(myCorpus, as.character)), stringsAsFactors=F)
 
 # Split Complaint into words 
 for (row in all_complaints_df) {
   splitrow<-strsplit(rm_white_multiple(row), " ")
 }
 
-# Run get_sentiment on each row
+# Run get_sentiment on each word in row
 syuzhet_score <- lapply(splitrow, function(x) get_sentiment(x, method="syuzhet") )
 bing_score<-lapply(splitrow, function(x) get_sentiment(x, method="bing") )
 afinn_score <- lapply(splitrow, function(x) get_sentiment(x, method="afinn") )
 nrc_score<-lapply(splitrow, function(x) get_sentiment(x, method="nrc") )
 
+#Add all the scored up
 syuzhet_score <- lapply(syuzhet_score, function(x) sum(sign(x)))
 bing_score <- lapply(bing_score, function(x) sum(sign(x)))
 afinn_score <- lapply(afinn_score, function(x) sum(sign(x)))
 nrc_score <- lapply(nrc_score, function(x) sum(sign(x)))
+
 
 all_scores<-cbind(
   syuzhet_score,
@@ -208,11 +210,21 @@ all_scores<-cbind(
   nrc_score
 )
 
-# Create sentiment score
+# Create sentiment scores dataframe
 sentimentdf<-data.frame(all_complaints_df,all_scores)
-colnames(sentimentdf) <- c("complaints", "syuzhet_score", "bing_score","afinn_score","nrc_score")
 
-df1 <- as.data.frame(as.matrix(dtm))
+# ------------------
+# Use Logistic Regression Model
+# ------------------
+
+#Document Term Martix as a Dataframe
+df1 <- data.frame(as.matrix(dtm), row.names = 1:nrow(dtm))
+
+# Iterate over different sentiment scores to get the different models 
+Model_syuzhet_score<-0
+Model_bing_score<-0
+Model_afinn_score<-0
+Model_nrc_score<-0
 
 scores<-c('syuzhet_score', 'bing_score','afinn_score','nrc_score')
 
@@ -226,21 +238,22 @@ for(score in scores)
   c1["sentiment"]<- 1
   
   # Take a random sampling of 200 rows
-  data_200 <- rbind(c0[sample(nrow(c0), 100),c(1,6)],c1[sample(nrow(c1), 100),c(1,6)])
-  names(data_200)<- c("complaints","sentiment")
+  data_200 <- rbind(c0[sample(nrow(c0), 100),c(1,6)],c1[sample(nrow(c1),100),c(1,6)])
   
-  df1_c<-cbind(c(1:length(data_200$sentiment)),df1,out_put_class=factor(data_200$sentiment), row.names = NULL)
+  df1_c<-merge(df1,data_200, by="row.names", all=FALSE)
+  df1_c$out_put_class <-factor(df1_c$sentiment)
+  df1_c<- subset(df1_c, select = -c(Row.names, sentiment,complaints))
   
   ## Using logistic regression 
   formula = as.formula('out_put_class~.')
   weka_fit1 <- Logistic(formula, data = df1_c)
-  print(weka_fit1)
+  assign(paste0("Weka_fit_", score), weka_fit1)
   assign(paste0("Model_", score), evaluate_Weka_classifier(weka_fit1, numFolds = 10, seed = 1, class = TRUE))
-  #evaluate_Weka_classifier(weka_fit1, numFolds = 10)
   print(paste("Finished", score, "Model"))
   
 }
 
+#Display the 10 fold Cross- Validation results
 Model_syuzhet_score
 Model_bing_score
 Model_afinn_score
