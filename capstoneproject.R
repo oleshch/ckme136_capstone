@@ -42,7 +42,7 @@ all_complaints <- dbGetQuery(dbconn, "SELECT consumer_complaint_narrative
                              FROM consumer_complaints 
                              WHERE consumer_complaint_narrative IS NOT NULL
                              ORDER BY RANDOM()
-                             LIMIT 1000")
+                             LIMIT 5000")
 
 # ------------------
 # Preprocessing
@@ -65,7 +65,7 @@ myCorpus <- tm_map(myCorpus, removeWords, stopwords("english"))
 # Remove common word endings
 myCorpus <- tm_map(myCorpus, stemDocument, language="english") 
 # Remove masked characters
-myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx", "xxxxxxxx","xxxxxxxxxxxx","xxxxxxxxxxxxxxxx"))   
+myCorpus <- tm_map(myCorpus, removeWords, c("xx","xxx","xxxx","xxxxx", "xxxxxxxx","xxxxxxxxxxxx","xxxxxxxxxxxxxxxx"))   
 # Create plain text documents
 myCorpus <- tm_map(myCorpus, PlainTextDocument) 
 
@@ -75,8 +75,8 @@ myCorpus <- tm_map(myCorpus, PlainTextDocument)
 # ------------------
 
 #Create Document Term Matrix
-dtm <- DocumentTermMatrix(myCorpus)
-#dtm <- removeSparseTerms(dtm, 0.4)
+dtm <- DocumentTermMatrix(myCorpus, minWordLength=3)
+dtm <- removeSparseTerms(dtm, 0.2)
 
 # Create Term frequency - inverse document frequency Matrix
 dtm_tfidf <- DocumentTermMatrix(myCorpus, control = list(weighting = weightTfIdf, minWordLength=3))
@@ -147,7 +147,7 @@ ggplot(company_response_to_consumer, aes(y = count, x = reorder(company_response
   geom_bar(stat="identity", fill="#173e43") +
   coord_flip() + 
   xlab("") + 
-  ylab("Number of complaints by Company") +
+  ylab("Company Response to Complaints") +
   theme_light(base_size = 16) 
 
 
@@ -212,35 +212,36 @@ all_scores<-cbind(
 sentimentdf<-data.frame(all_complaints_df,all_scores)
 colnames(sentimentdf) <- c("complaints", "syuzhet_score", "bing_score","afinn_score","nrc_score")
 
-c0<-sentimentdf[sentimentdf$nrc_score > 0,]
-c0["sentiment"]<- 0
-
-c1<-sentimentdf[sentimentdf$nrc_score < 0,]
-c1["sentiment"]<- 1
-
-# Take a random sampling of 50 rows
-c0_50 <- c0[sample(nrow(c0), 50),c(1,6)]
-c1_50 <- c1[sample(nrow(c1), 50),c(1,6)]
-names(c0_50)<- c("complaints","sentiment")
-names(c1_50)<- c("complaints","sentiment")
-
-data_100 <- rbind(c0_50, c1_50) 
-table(data_100$sentiment)
-
 df1 <- as.data.frame(as.matrix(dtm))
-df2 <- as.data.frame(as.matrix(dtm_tfidf))
 
-df1_c<-cbind(df1,out_put_class=as.factor(data_100$sentiment))
-df2_c<-cbind(df2,out_put_class=as.factor(data_100$sentiment))
+scores<-c('syuzhet_score', 'bing_score','afinn_score','nrc_score')
 
-#write.csv(df1_c, file="def1_c.csv")
+for(score in scores)
+{
+  print(paste("Started", score, "Model"))
+  c0<-sentimentdf[sentimentdf[score] > 0,]
+  c0["sentiment"]<- 0
+  
+  c1<-sentimentdf[sentimentdf[score] < 0,]
+  c1["sentiment"]<- 1
+  
+  # Take a random sampling of 200 rows
+  data_200 <- rbind(c0[sample(nrow(c0), 100),c(1,6)],c1[sample(nrow(c1), 100),c(1,6)])
+  names(data_200)<- c("complaints","sentiment")
+  
+  df1_c<-cbind(c(1:length(data_200$sentiment)),df1,out_put_class=factor(data_200$sentiment), row.names = NULL)
+  
+  ## Using logistic regression 
+  formula = as.formula('out_put_class~.')
+  weka_fit1 <- Logistic(formula, data = df1_c)
+  print(weka_fit1)
+  assign(paste0("Model_", score), evaluate_Weka_classifier(weka_fit1, numFolds = 10, seed = 1, class = TRUE))
+  #evaluate_Weka_classifier(weka_fit1, numFolds = 10)
+  print(paste("Finished", score, "Model"))
+  
+}
 
-
-## Using logistic regression 
-formula = as.formula('out_put_class ~ .')
-weka_fit1 <- Logistic(formula, data = df1_c)
-evaluate_Weka_classifier(weka_fit1, numFolds = 10)
-
-## logistic regression with tf-idf
-weka_fit2 <- Logistic(formula, data = df2_c)
-evaluate_Weka_classifier(weka_fit2, numFolds = 10)
+Model_syuzhet_score
+Model_bing_score
+Model_afinn_score
+Model_nrc_score
